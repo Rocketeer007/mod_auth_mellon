@@ -1,7 +1,7 @@
 /*
  *
  *   auth_mellon_cookie.c: an authentication apache module
- *   Copyright © 2003-2007 UNINETT (http://www.uninett.no/)
+ *   Copyright Â© 2003-2007 UNINETT (http://www.uninett.no/)
  *
  *   This program is free software; you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -107,62 +107,113 @@ const char *am_cookie_get(request_rec *r)
     name = am_cookie_name(r);
 
     cookie = apr_table_get(r->headers_in, "Cookie");
-    if(cookie == NULL) {
-        return NULL;
-    }
+    if(cookie != NULL) {
+        for(value = ap_strstr_c(cookie, name); value != NULL;
+            value = ap_strstr_c(value + 1, name)) {
 
-    for(value = ap_strstr_c(cookie, name); value != NULL;
-        value = ap_strstr_c(value + 1, name)) {
-
-        if(value != cookie) {
-            /* value isn't pointing to the start of the string. */
-            switch(value[-1]) {
-                /* We allow the name in the cookie-string to be
-                 * preceeded by [\t; ]. Note that only ' ' should be used
-                 * by browsers. We test against the others just to be sure.
-                 */
-            case '\t':
-            case ';':
-            case ' ':
-                break;
-            default:
-                /* value isn't preceeded by one of the listed characters, and
-                 * therefore we assume that it is part of another cookie.
-                 */
-                continue; /* Search for the next instance of the name. */
+            if(value != cookie) {
+                /* value isn't pointing to the start of the string. */
+                switch(value[-1]) {
+                    /* We allow the name in the cookie-string to be
+                     * preceeded by [\t; ]. Note that only ' ' should be used
+                     * by browsers. We test against the others just to be sure.
+                     */
+                case '\t':
+                case ';':
+                case ' ':
+                    break;
+                default:
+                    /* value isn't preceeded by one of the listed characters, and
+                     * therefore we assume that it is part of another cookie.
+                     */
+                    continue; /* Search for the next instance of the name. */
+                }
             }
-        }
 
-        if(value[strlen(name)] != '=') {
-            /* We don't have an equal-sign right after the name. Therefore we
-             * assume that what we have matched is only part of a longer name.
-             * We continue searching.
+            if(value[strlen(name)] != '=') {
+                /* We don't have an equal-sign right after the name. Therefore we
+                 * assume that what we have matched is only part of a longer name.
+                 * We continue searching.
+                 */
+                continue;
+            }
+
+            /* Now we have something that matches /[^ ,\t]<name>=/. The value
+             * (following the equal-sign) can be found at value + strlen(name) + 1.
              */
-            continue;
-        }
+            value += strlen(name) + 1;
 
-        /* Now we have something that matches /[^ ,\t]<name>=/. The value
-         * (following the equal-sign) can be found at value + strlen(name) + 1.
-         */
-        value += strlen(name) + 1;
+            /* The cookie value may be double-quoted. */
+            if(*value == '"') {
+                value += 1;
+            }
 
-        /* The cookie value may be double-quoted. */
-        if(*value == '"') {
-            value += 1;
-        }
+            buffer = apr_pstrdup(r->pool, value);
+            end = strchr(buffer, '"');
+            if(end) {
+                /* Double-quoted string. */
+                *end = '\0';
+            }
+            end = strchr(buffer, ';');
+            if(end) {
+                *end = '\0';
+            }
 
-        buffer = apr_pstrdup(r->pool, value);
-        end = strchr(buffer, '"');
-        if(end) {
-            /* Double-quoted string. */
-            *end = '\0';
-        }
-        end = strchr(buffer, ';');
-        if(end) {
-            *end = '\0';
-        }
+            /* Ignore a value of "cookietest" - it's not useful! */
+            //if (strncmp("cookietest", buffer, MIN(strlen(buffer), 10)) == 0)
+            //    break;
 
-        return buffer;
+            return buffer;
+        }
+    }
+    
+    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
+                     "cookie_get: Cookie %s not found; looking in QueryString [%s]", name, r->args);
+
+    if (r->args != NULL) {
+        for(value = ap_strstr_c(r->args, name); value != NULL;
+            value = ap_strstr_c(value + 1, name)) {
+
+            if(value != r->args) {
+                /* value isn't pointing to the start of the string. */
+                switch(value[-1]) {
+                    /* We allow the name in the query-string to be
+                     * preceeded by '&'.
+                     */
+                case '&':
+                    break;
+                default:
+                    /* value isn't preceeded by one of the listed characters, and
+                     * therefore we assume that it is part of another argument.
+                     */
+                    continue; /* Search for the next instance of the name. */
+                }
+            }
+
+            if(value[strlen(name)] != '=') {
+                /* We don't have an equal-sign right after the name. Therefore we
+                 * assume that what we have matched is only part of a longer name.
+                 * We continue searching.
+                 */
+                continue;
+            }
+
+            /* Now we have something that matches /[^&]<name>=/. The value
+             * (following the equal-sign) can be found at value + strlen(name) + 1.
+             */
+            value += strlen(name) + 1;
+
+            buffer = apr_pstrdup(r->pool, value);
+            end = strchr(buffer, '&');
+            if(end) {
+                *end = '\0';
+            }
+            
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
+                     "cookie_get: QueryString Argument %s found; value is [%s]", name, buffer);
+
+            return buffer;
+        }
     }
 
     /* We didn't find the cookie. */
